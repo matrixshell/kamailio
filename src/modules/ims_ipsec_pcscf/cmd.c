@@ -904,12 +904,6 @@ int ipsec_forward(struct sip_msg* m, udomain_t* d)
     //    from URI
     //int uri_len = 4 /* strlen("sip:") */ + ci.via_host.len + 5 /* max len of port number */ ;
 
-    if(m->dst_uri.s) {
-        pkg_free(m->dst_uri.s);
-        m->dst_uri.s = NULL;
-        m->dst_uri.len = 0;
-    }
-
     vb = cscf_get_last_via(m);
 
     char buf[1024];
@@ -929,7 +923,14 @@ int ipsec_forward(struct sip_msg* m, udomain_t* d)
             // for Request get the dest proto from the saved contact
             dst_proto = pcontact->received_proto;
         } else {
-            dst_proto = vb ? vb->proto : m->rcv.proto;
+			if (strstr(m->dst_uri.s, ";transport=tcp") != NULL) {
+				dst_proto = PROTO_TCP;
+			} else if (strstr(
+							  m->dst_uri.s, ";transport=tls") != NULL) {
+				dst_proto = PROTO_TLS;
+			} else {
+				dst_proto = m->rcv.proto;
+			}
         }
 
         // for Request sends from P-CSCF client port
@@ -955,6 +956,12 @@ int ipsec_forward(struct sip_msg* m, udomain_t* d)
         buf_len = snprintf(buf, sizeof(buf) - 1, "sip:%.*s:%d", ci.via_host.len, ci.via_host.s, dst_port);
     }
 
+	if(m->dst_uri.s) {
+		pkg_free(m->dst_uri.s);
+		m->dst_uri.s = NULL;
+		m->dst_uri.len = 0;
+	}
+
     if((m->dst_uri.s = pkg_malloc(buf_len + 1)) == NULL) {
         LM_ERR("Error allocating memory for dst_uri\n");
         goto cleanup;
@@ -975,6 +982,7 @@ int ipsec_forward(struct sip_msg* m, udomain_t* d)
    // Set destination info
     struct dest_info dst_info;
     dst_info.send_sock = client_sock;
+	set_force_socket(m, client_sock);
 #ifdef USE_DNS_FAILOVER
     if (!uri2dst(NULL, &dst_info, m, &m->dst_uri, dst_proto)) {
 #else
