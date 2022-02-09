@@ -157,7 +157,7 @@ static int fill_contact(struct pcontact_info* ci, struct sip_msg* m)
     contact_body_t* cb = NULL;
     struct via_body* vb = NULL;
     struct sip_msg* req = NULL;
-    str aor;
+    str aor, f_uri;
     int i = 0;
 
     if(!ci) {
@@ -222,13 +222,18 @@ static int fill_contact(struct pcontact_info* ci, struct sip_msg* m)
 
         cb = cscf_parse_contacts(&req_msg);
         if (!cb || (!cb->contacts)) {
-            LM_ERR("Reply No contact headers\n");
-            return -1;
+            LM_ERR("Reply No contact headers. Will try with request's From URI\n");
+            if (!cscf_get_from_uri(&req_msg, &f_uri)) {
+                LM_INFO("From URI in request <%.*s>\n", f_uri.len, f_uri.s);
+                pkg_free(req_msg.buf);
+                return -1;
+            }
         }
 
         vb = cscf_get_ue_via(m);
         if (!vb) {
             LM_ERR("Reply No via body headers\n");
+            pkg_free(req_msg.buf);
             return -1;
         }
 
@@ -237,16 +242,18 @@ static int fill_contact(struct pcontact_info* ci, struct sip_msg* m)
         ci->via_port = vb->port;
         ci->via_prot = vb->proto;
 
-        aor.s = pkg_malloc(cb->contacts->uri.len);
+        aor.s = pkg_malloc((cb && cb->contacts) ? cb->contacts->uri.len : f_uri.len);
         if (aor.s == NULL) {
             LM_ERR("memory allocation failure\n");
+            pkg_free(req_msg.buf);
             return -1;
         }
-        memcpy(aor.s, cb->contacts->uri.s, cb->contacts->uri.len);
-        aor.len = cb->contacts->uri.len;
+        memcpy(aor.s, (cb && cb->contacts) ? cb->contacts->uri.s : f_uri.s, (cb && cb->contacts) ? cb->contacts->uri.len : f_uri.len);
+        aor.len = (cb && cb->contacts) ? cb->contacts->uri.len : f_uri.len;
 
         //ci->aor = cb->contacts->uri;
         ci->searchflag = SEARCH_RECEIVED;
+        pkg_free(req_msg.buf);
     }
     else {
         LM_ERR("Unknown first line type: %d\n", m->first_line.type);
@@ -914,10 +921,20 @@ int ipsec_forward(struct sip_msg* m, udomain_t* d)
         // https://tools.ietf.org/html/rfc3261#section-18
 
         // for Reply and TCP sends from P-CSCF server port, for Reply and UDP sends from P-CSCF client port
-        src_port = dst_proto == PROTO_TCP ? s->port_ps : s->port_pc;
+        // src_port = dst_proto == PROTO_TCP ? s->port_ps : s->port_pc;
 
         // for Reply and TCP sends to UE client port, for Reply and UDP sends to UE server port
-        dst_port = dst_proto == PROTO_TCP ? s->port_uc : s->port_us;
+        // dst_port = dst_proto == PROTO_TCP ? s->port_uc : s->port_us;
+
+        // From P-CSCF client port
+        src_port = s->port_pc;
+
+        if (vb && ((vb->port == s->port_uc) || (vb->port == s->port_us))) {
+            dst_port = vb->port;
+        } else {
+            dst_port = s->port_us;
+        }
+
     }else{
         if (req->first_line.u.request.method_value == METHOD_REGISTER) {
             // for Request get the dest proto from the saved contact
@@ -925,8 +942,7 @@ int ipsec_forward(struct sip_msg* m, udomain_t* d)
         } else {
 			if (strstr(m->dst_uri.s, ";transport=tcp") != NULL) {
 				dst_proto = PROTO_TCP;
-			} else if (strstr(
-							  m->dst_uri.s, ";transport=tls") != NULL) {
+			} else if (strstr(m->dst_uri.s, ";transport=tls") != NULL) {
 				dst_proto = PROTO_TLS;
 			} else {
 				dst_proto = m->rcv.proto;
