@@ -926,15 +926,18 @@ int ipsec_forward(struct sip_msg* m, udomain_t* d)
         // for Reply and TCP sends to UE client port, for Reply and UDP sends to UE server port
         // dst_port = dst_proto == PROTO_TCP ? s->port_uc : s->port_us;
 
-        // From P-CSCF client port
-        src_port = dst_proto == PROTO_TCP ? req->rcv.dst_port : s->port_pc;
-
-        if (vb && ((vb->port == s->port_uc) || (vb->port == s->port_us))) {
-            dst_port = vb->port;
+        // From Reply and TCP send via the same ports Request was recevied.
+        if (dst_proto == PROTO_TCP) {
+            src_port = req->rcv.dst_port;
+            dst_port = req->rcv.src_port;
         } else {
-            dst_port = s->port_us;
+            src_port =  s->port_pc;
+            if (vb && ((vb->port == s->port_uc) || (vb->port == s->port_us))) {
+                dst_port = vb->port;
+            } else {
+                dst_port = s->port_us;
+            }
         }
-
     }else{
         if (req->first_line.u.request.method_value == METHOD_REGISTER) {
             // for Request get the dest proto from the saved contact
