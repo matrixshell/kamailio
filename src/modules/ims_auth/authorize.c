@@ -547,7 +547,7 @@ int www_resync_auth(struct sip_msg* msg, char* _route, char* str1, char* str2) {
         return CSCF_RETURN_BREAK;
     }
 
-    algo_type = registration_default_algorithm_type;
+    algo_type = get_algorithm_type({"AKAv1-MD5", 9});
 
     /* check if it is a synchronization request */
     //TODO this is MAR syncing - have removed it currently - TOD maybe put back in
